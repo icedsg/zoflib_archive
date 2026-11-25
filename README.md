@@ -31,7 +31,7 @@ Below the gate: use the best existing tool and stop.
 
 ## Benchmarks
 `python bench/bench.py DIR [DIR ...]` (needs `zstandard` and `cryptography`). In memory, no disk timing.
-Results: [bench/RESULTS.md](bench/RESULTS.md).
+Results: [bench/RESULTS.md](bench/RESULTS.md), [bench/STREAMS.md](bench/STREAMS.md) (against 7-Zip, RAR, zstd, zpaq).
 
 ## Licence
 MIT, see [LICENSE](LICENSE).
