@@ -1,7 +1,7 @@
 # zoflib_archive
 
 A library for encrypted, compressed archives that adapt to the disk they are written to: old USB hard disks, SD cards,
-SATA SSDs and NVMe. Status: a working archiver (`zofa`) with tests; not yet measured on real disks and the format may
+SATA SSDs and NVMe. Status: a working archiver (`zofa`) with tests; first timings on a USB hard disk only, and the format may
 still change. Keep other copies of anything stored with it.
 
 ## Goal
