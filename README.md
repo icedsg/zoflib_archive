@@ -53,7 +53,7 @@ Not done yet: C interface and wrappers, parity against bad sectors, disk-speed d
 
 ## Benchmarks
 `python bench/bench.py DIR [DIR ...]` (needs `zstandard` and `cryptography`). In memory, no disk timing.
-Results: [bench/RESULTS.md](bench/RESULTS.md), [bench/STREAMS.md](bench/STREAMS.md) (against 7-Zip, RAR, zstd, zpaq).
+Results: [bench/RESULTS.md](bench/RESULTS.md), [bench/DISK.md](bench/DISK.md) (USB hard disk), [bench/STREAMS.md](bench/STREAMS.md) (against 7-Zip, RAR, zstd, zpaq).
 
 ## Licence
 MIT, see [LICENSE](LICENSE).
