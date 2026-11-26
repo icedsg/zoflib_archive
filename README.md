@@ -1,7 +1,8 @@
 # zoflib_archive
 
 A library for encrypted, compressed archives that adapt to the disk they are written to: old USB hard disks, SD cards,
-SATA SSDs and NVMe. Status: design and benchmarks only; no archiver yet. Do not store data with it.
+SATA SSDs and NVMe. Status: a working archiver (`zofa`) with tests; not yet measured on real disks and the format may
+still change. Keep other copies of anything stored with it.
 
 ## Goal
 Store more on any disk and read it back sooner, with one passphrase. On a slow disk, spare CPU time is spent writing
@@ -28,6 +29,27 @@ Measured end to end on real disks (USB hard disk, SATA SSD, NVMe), including a f
   on at least one disk type, and no slower than a plain copy on the others.
 - Own codec: at least 10% better total time than zstd inside the same archiver. Otherwise zstd stays.
 Below the gate: use the best existing tool and stop.
+
+## Use
+```
+cargo build --release
+zofa pack FOLDER ARCHIVE [--level fast|balanced|max] [--resume] [--no-pass]
+zofa list ARCHIVE
+zofa verify ARCHIVE
+zofa extract ARCHIVE NEW_FOLDER [PATH_PREFIX]
+```
+The passphrase comes from `ZOFA_PASS` or is asked for. With `--no-pass` the archive is still checked for damage, but
+anyone can read it. Format: [docs/FORMAT.md](docs/FORMAT.md).
+
+What it does now:
+- Files are grouped by kind (text, programs, mail, packed, media, other); each kind gets its own settings.
+- Deflate inside zip, gzip and PNG is undone and redone exactly (preflate); JPEG is recoded without loss (Lepton);
+  Outlook PST/OST files are unscrambled and put in logical order. Exact duplicates are stored once.
+- Levels: fast (zstd), balanced (LZMA for text, programs and pixels, zstd for the rest), max (LZMA, x86 filter for programs).
+- Every segment is authenticated; damage or a wrong passphrase gives an error, never wrong data. A cut-off archive still
+  gives back every file it had indexed, and an interrupted pack can be resumed.
+
+Not done yet: C interface and wrappers, parity against bad sectors, disk-speed detection, fuzzing, timings on real disks.
 
 ## Benchmarks
 `python bench/bench.py DIR [DIR ...]` (needs `zstandard` and `cryptography`). In memory, no disk timing.

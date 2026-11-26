@@ -1,0 +1,38 @@
+[package]
+name = "zoflib_archive"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Encrypted, compressed archives that adapt to the speed of the disk"
+exclude = ["experiments", "bench"]
+
+[[bin]]
+name = "zofa"
+path = "src/main.rs"
+
+[workspace]
+
+[dependencies]
+anyhow = "1.0.105"
+argon2 = "0.5"
+blake3 = "1.8.7"
+chacha20poly1305 = "0.10"
+crc32fast = "1.5.6"
+rpassword = "7"
+flate2 = "1.1.11"
+getrandom = "0.4.3"
+lepton_jpeg = "0.5.8"
+liblzma = "0.4.9"
+postcard = { version = "1.2.0", features = ["use-std"] }
+preflate-rs = "0.7.6"
+rayon = "1.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+walkdir = "2.5.1"
+zeroize = "1.9.2"
+zstd = { version = "0.14.5", features = ["zstdmt"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[profile.dev]
+opt-level = 2

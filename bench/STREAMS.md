@@ -20,5 +20,23 @@ Sizes in MB (seconds) for real files from an old USB disk, six CPU threads, othe
   text 52 s, binary 39 s, zipped 63 s, mail 29 s.
 - Not compared: paq8px, precomp, WinZip Zipx, other recompressing tools. Only the stream rebuild was verified; the back
   ends are stock tools and their output was not extracted again.
-- Audio: no gain (99 MB of MP3 stays 99 MB). Video was not tried.
+- Audio: no gain (99 MB of MP3 stays 99 MB). Video: see below.
 - Code: [experiments/streams](../experiments/streams) (whole-file in memory, not an archiver).
+
+## MPEG-4 Part 2 video (DivX/Xvid AVI), estimate, 2026-11-26
+
+An estimator parses every picture of the video stream and codes the same symbols (macroblock types, motion vectors,
+DC, coefficients) with adaptive context models instead of the fixed codes. Six 4-minute extracts from different films:
+
+| Clip | video KB | estimate KB | change |
+|---|---|---|---|
+| 0 | 22,859 | 19,406 | -15.1% |
+| 1 | 52,833 | 44,410 | -15.9% |
+| 2 | 29,675 | 25,951 | -12.6% |
+| 3 | 23,853 | 19,503 | -18.2% |
+| 4 | 22,068 | 18,529 | -16.0% |
+| 5 | 31,188 | 26,586 | -14.8% |
+
+- About 186 million coefficient symbols; none was written in a non-standard way, so an exact rebuild looks possible.
+- An estimate only: no encoder or decoder was written, and nothing was rebuilt. About 0.6 MB/s per thread.
+- H.264/H.265 (most MP4/MKV) was not tried; it already uses arithmetic or adaptive coding, and gains are smaller.
