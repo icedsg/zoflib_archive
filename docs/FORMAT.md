@@ -16,6 +16,10 @@ tail (16): footer offset u64, "ZOFAEND1"
 An archive without the footer and tail is incomplete (interrupted or cut short). Everything an Index segment
 names can still be read, and `pack --resume` continues after the last Index segment.
 
+`add` grows an archive without changing anything an index points at: it cuts only what follows the last Index
+segment (the old footer and tail, or data no index names yet), writes the new and changed files with their own Index
+segments, then a new footer and tail. Records are never removed.
+
 ## Header
 
 | Offset | Size | Field |
@@ -49,7 +53,8 @@ Cipher: XChaCha20-Poly1305 with that key.
 | 41 | n | ciphertext |
 
 Associated data: BLAKE3 hash of the 64 header bytes (32), then kind (1), then id (8). A segment that fails
-authentication is never used. A reader that meets a damaged frame searches forward for the next `ZSG1`.
+authentication is never used. A reader that meets a damaged frame, or a Data segment whose end is not the start of
+another segment, searches forward for the next `ZSG1`.
 
 - **KeyCheck** (id 0): plaintext `zoflib`. A failure here means a wrong passphrase or a damaged start.
 - **Data** (id = group id): one group, below.
@@ -64,8 +69,10 @@ Nonces are random, so ids may repeat after a resume. The authentication tag, not
 - `GroupRec { id, at, len }`: a Data segment's offset and full length.
 - `UnitRec { id, hash, len, group, slot }`: a unit is a piece of file data (at most 64 MiB). `hash` is BLAKE3 of the
   unit, `slot` its place in the group. Units with the same hash and length are stored once.
-- `FileRec { path, size, mtime, hash, form, units }`: `path` uses `/`, relative, never `..`, absolute or with a drive or
-  stream name. `hash` is BLAKE3 of the whole file and is checked on every restore.
+- `FileRec { path, size, mtime, hash, form, units, added }`: `path` uses `/`, relative, never `..`, absolute or with a
+  drive or stream name. `hash` is BLAKE3 of the whole file and is checked on every restore. `added` is the start of
+  the run that stored the record, seconds since 1970. Earlier records of the same path are older versions and stay
+  readable.
   - `Plain`: the file is its units joined in order.
   - `Mail`: an Outlook PST/OST file. The units are the data blocks in logical order, then a rest unit, then a layout
     unit. The layout rebuilds the file from them byte for byte (see `src/mail.rs`).

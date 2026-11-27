@@ -36,8 +36,11 @@ cargo build --release
 zofa pack FOLDER ARCHIVE [--level fast|balanced|max] [--resume] [--no-pass]
 zofa list ARCHIVE
 zofa verify ARCHIVE
-zofa extract ARCHIVE NEW_FOLDER [PATH_PREFIX]
+zofa extract ARCHIVE NEW_FOLDER [PATH_PREFIX] [--all]
+zofa add FOLDER ARCHIVE [--exclude NAME]...
 ```
+`add` is add-only: it makes the archive if missing, otherwise stores new and changed files. Files deleted from the
+folder stay in the archive, and older versions stay readable (`list --all`, `extract --all`).
 The passphrase comes from `ZOFA_PASS` or is asked for. With `--no-pass` the archive is still checked for damage, but
 anyone can read it. Format: [docs/FORMAT.md](docs/FORMAT.md).
 
