@@ -41,6 +41,8 @@ pub struct FileRec {
     pub hash: Hash,
     pub form: Form,
     pub units: Vec<u64>,
+    /// when this record was added, seconds since 1970 (the start of that pack or add run)
+    pub added: i64,
 }
 /// One index segment. An archive's index is all of them together; each covers only groups already written before it.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

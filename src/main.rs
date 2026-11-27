@@ -2,10 +2,14 @@ use anyhow::{bail, ensure, Context, Result};
 use std::{path::Path, process::exit, time::Instant};
 use zoflib_archive::{group::Level, pack, restore::Archive};
 
-const HELP: &str = "zofa pack FOLDER ARCHIVE [--level fast|balanced|max] [--resume] [--no-pass]
-zofa list ARCHIVE
+const HELP: &str = "zofa pack FOLDER ARCHIVE [--level fast|balanced|max] [--resume] [--no-pass] [--exclude NAME]...
+zofa add FOLDER ARCHIVE [same options as pack]
+zofa list ARCHIVE [--all]
 zofa verify ARCHIVE
-zofa extract ARCHIVE NEW_FOLDER [PATH_PREFIX]
+zofa extract ARCHIVE NEW_FOLDER [PATH_PREFIX] [--all]
+add: add-only; makes the archive if missing, else adds new and changed files. Nothing is ever removed:
+     files deleted from FOLDER stay in the archive, and older versions stay too.
+--all: older versions as well; extract writes them as PATH~YYYYMMDD-HHMMSS (UTC time they were added).
 The passphrase comes from ZOFA_PASS, or is asked for (not shown while typing).
 --no-pass: no passphrase; the archive is still checked for damage, but anyone can read it.";
 
@@ -28,26 +32,42 @@ fn run() -> Result<bool> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let flag = |f: &str| a.iter().any(|x| x == f);
     let val = |f: &str| a.iter().position(|x| x == f).and_then(|i| a.get(i + 1)).cloned();
-    let arg = |i: usize| a.get(i).context(HELP);
+    // positional arguments: everything that is not an option or an option's value
+    let mut pos: Vec<String> = vec![];
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--level" | "--exclude" => i += 2,
+            x if x.starts_with("--") => i += 1,
+            _ => {
+                pos.push(a[i].clone());
+                i += 1;
+            }
+        }
+    }
+    let arg = |i: usize| pos.get(i).context(HELP);
     let t = Instant::now();
     match a.first().map(|s| s.as_str()) {
-        Some("pack") => {
+        Some(cmd @ ("pack" | "add")) => {
             let level = match val("--level").as_deref() {
                 None | Some("balanced") => Level::Balanced,
                 Some("fast") => Level::Fast,
                 Some("max") => Level::Max,
                 Some(x) => bail!("unknown level {x}"),
             };
-            let resume = flag("--resume");
+            let (resume, add) = (flag("--resume"), cmd == "add");
             let dst = Path::new(arg(2)?);
+            let exists = dst.exists() && dst.metadata()?.len() > 0;
             let p = if flag("--no-pass") {
+                ensure!(!exists || !zoflib_archive::container::has_passphrase(dst)?, "this archive has a passphrase");
                 String::new()
-            } else if resume && !zoflib_archive::container::has_passphrase(dst)? {
-                bail!("this archive has no passphrase; resume it with --no-pass")
+            } else if (resume || add) && exists && !zoflib_archive::container::has_passphrase(dst)? {
+                bail!("this archive has no passphrase; use --no-pass")
             } else {
-                pass(!resume)?
+                pass(!exists)?
             };
-            let o = pack::Options { level, resume, ..Default::default() };
+            let exclude = a.windows(2).filter(|w| w[0] == "--exclude").map(|w| w[1].clone()).collect();
+            let o = pack::Options { level, resume, add, exclude, ..Default::default() };
             let r = pack::pack(Path::new(arg(1)?), dst, &p, o)?;
             for (n, why) in &r.skipped {
                 eprintln!("left out: {n}: {why}");
@@ -69,9 +89,14 @@ fn run() -> Result<bool> {
             for d in &z.damage {
                 eprintln!("damage: {d}");
             }
+            if flag("--all") {
+                z.include_older();
+            }
             if c == "list" {
-                for f in &z.files {
-                    println!("{:>14}  {}", f.size, f.path);
+                let mut l: Vec<_> = z.files.iter().collect();
+                l.sort_by(|x, y| x.path.cmp(&y.path));
+                for f in l {
+                    println!("{}  {:>14}  {}", zoflib_archive::restore::stamp(f.added), f.size, f.path);
                 }
                 return Ok(z.complete);
             }
@@ -80,7 +105,7 @@ fn run() -> Result<bool> {
                 let p = Path::new(o);
                 ensure!(!p.exists() || p.read_dir()?.next().is_none(), "the output folder must be new or empty");
             }
-            let prefix = if c == "extract" { a.get(3).cloned().unwrap_or_default() } else { String::new() };
+            let prefix = if c == "extract" { pos.get(3).cloned().unwrap_or_default() } else { String::new() };
             let r = z.restore(&|n| n.starts_with(&prefix), out.as_deref().map(Path::new))?;
             for (n, why) in &r.failed {
                 eprintln!("failed: {n}: {why}");

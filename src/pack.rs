@@ -16,7 +16,7 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Options {
     pub level: Level,
     /// bytes of input per group
@@ -24,6 +24,11 @@ pub struct Options {
     /// groups being compressed at once
     pub in_flight: usize,
     pub resume: bool,
+    /// add-only: create the archive if missing, else add new and changed files to it, complete or not. Nothing is
+    /// ever removed; a file deleted from the folder stays in the archive, and older versions stay readable.
+    pub add: bool,
+    /// names left out wherever they appear in a path (a folder name leaves out all under it)
+    pub exclude: Vec<String>,
     /// index written after this many stored bytes; what an interrupted run can lose
     pub checkpoint: u64,
     /// stop early after this many checkpoints, as if interrupted (tests)
@@ -31,7 +36,7 @@ pub struct Options {
 }
 impl Default for Options {
     fn default() -> Self {
-        Options { level: Level::Balanced, group: 64 << 20, in_flight: 4, resume: false, checkpoint: 256 << 20, stop_after: None }
+        Options { level: Level::Balanced, group: 64 << 20, in_flight: 4, resume: false, add: false, exclude: vec![], checkpoint: 256 << 20, stop_after: None }
     }
 }
 #[derive(Default, Debug)]
@@ -73,6 +78,7 @@ struct Packer {
     rx: mpsc::Receiver<Done>,
     pool: rayon::ThreadPool,
     rep: Report,
+    started: i64,
 }
 
 impl Packer {
@@ -209,7 +215,7 @@ impl Packer {
         ensure!(m2.len() == size && self::mtime(&m2)? == mtime, "changed while being read");
         self.rep.files += 1;
         self.rep.bytes += size;
-        let rec = FileRec { path: name.into(), size, mtime, hash: *h.finalize().as_bytes(), form, units };
+        let rec = FileRec { path: name.into(), size, mtime, hash: *h.finalize().as_bytes(), form, units, added: self.started };
         self.waiting.push((rec, groups));
         Ok(())
     }
@@ -242,23 +248,25 @@ pub fn mtime(m: &fs::Metadata) -> Result<(i64, u32)> {
 pub fn pack(src: &Path, dst: &Path, pass: &str, o: Options) -> Result<Report> {
     ensure!(src.is_dir(), "source is not a folder");
     let src = src.canonicalize()?;
+    let cont = o.resume || o.add;
     let mut f = OpenOptions::new()
         .read(true)
         .write(true)
-        .create_new(!o.resume)
-        .create(o.resume)
+        .create_new(!cont)
+        .create(cont)
         .truncate(false)
         .open(dst)
-        .context("opening the archive (it must not exist yet unless resuming)")?;
+        .context("opening the archive (it must not exist yet unless resuming or adding)")?;
     let me = dst.canonicalize()?;
     let mut scan = Scan::default();
-    let (keys, at) = if o.resume && f.metadata()?.len() > 0 {
+    let (keys, at) = if cont && f.metadata()?.len() > 0 {
         let keys = container::open(&mut f, pass)?;
         scan = restore::scan(&mut f, &keys)?;
-        if scan.complete {
-            bail!("this archive is already complete");
+        if scan.complete && !o.add {
+            bail!("this archive is already complete (use add to add to it)");
         }
-        // everything after the last index belongs to files that are packed again
+        // After the last index there is only the old footer, or data of files that had no index yet (they are
+        // packed again). Nothing an index points at is cut.
         f.set_len(scan.end)?;
         f.seek(SeekFrom::Start(scan.end))?;
         (keys, scan.end)
@@ -290,8 +298,11 @@ pub fn pack(src: &Path, dst: &Path, pass: &str, o: Options) -> Result<Report> {
         rx,
         pool: rayon::ThreadPoolBuilder::new().build()?,
         rep: Report::default(),
+        started: std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0),
     };
-    for e in walkdir::WalkDir::new(&src).follow_links(false).sort_by_file_name() {
+    let ex = p.o.exclude.clone();
+    let walk = walkdir::WalkDir::new(&src).follow_links(false).sort_by_file_name().into_iter();
+    for e in walk.filter_entry(|e| e.depth() == 0 || !ex.iter().any(|x| e.file_name().to_str() == Some(x.as_str()))) {
         if p.stopped() {
             return Ok(p.rep);
         }

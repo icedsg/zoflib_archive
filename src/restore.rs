@@ -74,7 +74,24 @@ pub fn scan(f: &mut File, keys: &Keys) -> Result<Scan> {
                     }
                 }
             },
-            Kind::Data => {}
+            Kind::Data => {
+                // a damaged length must not make the scan step over good segments: the next one has to start there
+                if next + 4 <= size {
+                    let mut m = [0u8; 4];
+                    f.seek(SeekFrom::Start(next))?;
+                    f.read_exact(&mut m)?;
+                    if &m != container::SEG_MAGIC {
+                        s.damage.push(format!("data segment at {at} does not end where a segment starts"));
+                        match next_magic(f, at + 1, size)? {
+                            Some(n) => {
+                                at = n;
+                                continue;
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            }
         }
         at = next;
     }
@@ -104,6 +121,8 @@ pub struct Archive {
     pub complete: bool,
     pub damage: Vec<String>,
     pub files: Vec<FileRec>,
+    /// earlier records of paths that were added again later (older versions)
+    pub older: Vec<FileRec>,
     pub dirs: Vec<String>,
     groups: HashMap<u64, GroupRec>,
     units: HashMap<u64, UnitRec>,
@@ -145,8 +164,11 @@ impl Archive {
         };
         // a later record of the same path replaces an earlier one
         let mut files = BTreeMap::new();
+        let mut older = vec![];
         for r in s.index.files {
-            files.insert(r.path.clone(), r);
+            if let Some(o) = files.insert(r.path.clone(), r) {
+                older.push(o);
+            }
         }
         Ok(Archive {
             f,
@@ -154,10 +176,28 @@ impl Archive {
             complete: s.complete && s.damage.is_empty(),
             damage: s.damage,
             files: files.into_values().collect(),
+            older,
             dirs: s.index.dirs,
             groups: s.index.groups.into_iter().map(|g| (g.id, g)).collect(),
             units: s.index.units.into_iter().map(|u| (u.id, u)).collect(),
         })
+    }
+
+    /// Makes older versions part of `files`, each under `path~YYYYMMDD-HHMMSS` (the time it was added), so a restore
+    /// writes them next to the latest one.
+    pub fn include_older(&mut self) {
+        let mut taken: HashSet<String> = self.files.iter().map(|f| f.path.clone()).collect();
+        for mut f in std::mem::take(&mut self.older) {
+            let base = format!("{}~{}", f.path, stamp(f.added));
+            let mut name = base.clone();
+            let mut n = 1;
+            while !taken.insert(name.clone()) {
+                n += 1;
+                name = format!("{base}-{n}");
+            }
+            f.path = name;
+            self.files.push(f);
+        }
     }
 
     fn load(&mut self, g: u64, want: &[bool]) -> Result<Vec<Result<Vec<u8>>>> {
@@ -414,4 +454,20 @@ fn write_at(out: &Path, rel: &str, off: u64, d: &[u8], first: bool) -> Result<()
     f.seek(SeekFrom::Start(off))?;
     f.write_all(d)?;
     Ok(())
+}
+
+/// `YYYYMMDD-HHMMSS` in UTC for seconds since 1970.
+pub fn stamp(t: i64) -> String {
+    let (d, s) = (t.div_euclid(86400), t.rem_euclid(86400));
+    // days to civil date (Howard Hinnant's algorithm)
+    let z = d + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
+    format!("{year:04}{month:02}{day:02}-{:02}{:02}{:02}", s / 3600, s / 60 % 60, s % 60)
 }

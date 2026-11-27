@@ -253,3 +253,55 @@ fn archive_without_passphrase() {
     };
     assert!(found);
 }
+
+#[test]
+fn add_only_keeps_deleted_files_and_old_versions() {
+    let t = tempfile::tempdir().unwrap();
+    let (s, a) = (t.path().join("src"), t.path().join("a.zofa"));
+    fs::create_dir_all(s.join(".git/objects")).unwrap();
+    fs::create_dir_all(s.join("plans")).unwrap();
+    fs::write(s.join(".git/objects/x"), b"git data").unwrap();
+    fs::write(s.join("plans/p.md"), b"first plan").unwrap();
+    fs::write(s.join("mock.png"), png(&[7u8; 5000])).unwrap();
+    let o = |l| Options { add: true, exclude: vec![".git".into()], ..opts(l) };
+    assert!(pack(&s, &a, "pw", o(Level::Max)).unwrap().complete);
+    let before = fs::read(&a).unwrap();
+    let foot_at = u64::from_le_bytes(before[before.len() - 16..before.len() - 8].try_into().unwrap()) as usize;
+    // change one, delete one, add one
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fs::write(s.join("plans/p.md"), b"second plan, longer").unwrap();
+    fs::remove_file(s.join("mock.png")).unwrap();
+    fs::write(s.join("new.md"), b"new").unwrap();
+    let r = pack(&s, &a, "pw", o(Level::Max)).unwrap();
+    assert!(r.complete && r.resumed_files == 0 && r.files == 2, "{r:?}");
+    // the same again: nothing new
+    let r = pack(&s, &a, "pw", o(Level::Fast)).unwrap();
+    assert_eq!((r.files, r.resumed_files), (2, 2));
+    let after = fs::read(&a).unwrap();
+    assert_eq!(&after[..foot_at], &before[..foot_at], "what was written before must not change");
+    let mut z = Archive::open(&a, "pw").unwrap();
+    assert!(z.complete);
+    let names: Vec<&str> = z.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(names, ["mock.png", "new.md", "plans/p.md"]);
+    assert_eq!(z.older.len(), 1);
+    z.include_older();
+    let out = t.path().join("out");
+    assert!(z.restore(&|_| true, Some(&out)).unwrap().failed.is_empty());
+    let got = tree(&out);
+    assert!(!got.keys().any(|k| k.contains(".git")));
+    assert_eq!(got["plans/p.md"], b"second plan, longer");
+    assert_eq!(got["mock.png"], png(&[7u8; 5000]));
+    let old: Vec<_> = got.iter().filter(|(k, _)| k.starts_with("plans/p.md~")).collect();
+    assert_eq!(old.len(), 1);
+    assert_eq!(old[0].1, b"first plan");
+    // a wrong passphrase cannot add
+    assert!(pack(&s, &a, "other", o(Level::Fast)).is_err());
+}
+
+#[test]
+fn stamps() {
+    use zoflib_archive::restore::stamp;
+    assert_eq!(stamp(0), "19700101-000000");
+    assert_eq!(stamp(1_795_000_000), "20261118-110640");
+    assert_eq!(stamp(951_782_400), "20000229-000000");
+}
